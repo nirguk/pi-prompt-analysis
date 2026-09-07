@@ -36,20 +36,6 @@ Ship a pi extension (`ppa` / `pi-prompt-analysis`) that audits a fresh session's
 5. **Commit + tag**: one commit per logical change;; then `git tag v0.1.0 && git push origin main --tags`(or `gh release create v0.1.0`;; and update README install example to pinned `@v0.1.0` — decide floating vs pinned (Open decisions。
 6. **(Optional, get user OK first** Install into harness: `cd /workspaces/base_pi && pi install -l git:github.com/nirguk/pi-prompt-analysis` — project-local settings → auto-loads every harness session → auto-handshake each fresh session (recurring ≈15.5k tok ≈$0.002 warm-up each — confirm user accepts the recurring cost/habit before enabling. Alternatively keep it `-e`-manual or user-global.
 
-## Gotcha — CRITICAL
-
-**Tool-call payload corruption this session**: edits/writes kept landing **doubled commas** (`AUDIT_ENTRY,,`, `new Box(1,, 1,,`, `0,, 0`, `.reduce((n,, t)…`) and occasional stray `\"` in code — the file on disk was then corrupt (jiti/TS would fail or misbehave)). Mitigation protocol:
-- After **any** write/edit of a `.ts` file: (a) `rg -n ',,' extensions/ppa.ts` +(b) `git diff` read-back;(c) run the smoke test (below);(d) only then commit.
-- If corruption recurs: `git checkout -- extensions/ppa.ts` (restores healthy v0 given; then re-apply minimal edits one at a time;(or generate the file via a node script that writes a heredoc-held template string — bypasses tool-payload serialization entirely。
-
-## Smoke-test receipt (both verified working pre-corruption
-
-- Harness: `cd /workspaces/base_pi` — has OPENROUTER_API_KEY + `.pi/settings.json` (defaultModel = deepseek flash;。
-- Local: `pi -e /workspaces/pi-prompt-analysis/extensions/ppa.ts -p "say ok"` → expect: **no load errors**, three 🔍 console blocks (cold → payload → usage) + usage numbers + the replied output.
-- From git: `pi -e git:github.com/nirguk/pi-prompt-analysis -p "reply with one word"` → same（.
-- Caveat: `-p` = print mode → `ctx.hasUI` = false → **auto-handshake + notify + dialogs skip by design** (guarded;wait — verify the skip logic reads correctly; card = TUI-only. To see handshake/card/notify: run interactive (`pi` in the harness, extension loaded) or `--mode rpc`. Or verify the "off" path with `PPA_HANDSHAKE=0`.
-- Expected numbers (from earlier runs): tools 18–19 ≈ 43.3–43.7KB (≈10.9k tok; `subagent` tool schemas alone ≈19.2KB;; system prompt ≈15.3KB (context files 6.3KB, skills 3.1KB, guidelines 4KB;; TOTAL **≈59KB ≈ 14.8k tok**;; real first-turn usage ≈**15.5k input tok, ≈$0.0022**.
-
 ## Open decisions (user
 
 - Default-on handshake = every fresh session pays ≈15.5k-tok ≈$0.002 warm-up — user already approved default-on in principle;; re-flagthe recurring cost specifically for the base_pi install step (todo 6。
