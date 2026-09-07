@@ -241,7 +241,7 @@ function renderAuditCard(entry: { data?: AuditRecord }, expanded: boolean, theme
     if (messages.length > 0 || expanded) {
       lines.push(`${muted(`  Messages (${messages.length}):`)} ${fmtBytes(messagesChars)} (~${fmtTokens(estimateTokens(messagesChars))} tok)`);
       for (const m of showMessages) {
-        lines.push(dim(`     · [${m.index}] (${m.role}): ${fmtBytes(m.chars)} (~${fmtTokens(estimateTokens(m.chars)} tok)`));
+        lines.push(dim(`     · [${m.index}] (${m.role}): ${fmtBytes(m.chars)} (~${fmtTokens(estimateTokens(m.chars))} tok)`));
       }
       if (expanded && messages.length > showMessages.length) {
         lines.push(dim(`     · … ${messages.length - showMessages.length} more`));
