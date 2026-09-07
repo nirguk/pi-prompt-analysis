@@ -4,11 +4,11 @@ Cold-start prompt audit for [pi](https://github.com/earendil-works/pi-coding-age
 
 ## What it does
 
-Every audit phase is logged to the console, persisted in the session (`ppa:audit` custom entries), and emitted on `pi.events` (`"ppa:audit"` for inter-extension consumers).
+Every audit phase is logged to the console, persisted in the session (`ppa:audit` custom entries), rendered as a compact inline card in the TUI transcript, and emitted on `pi.events` (`"ppa:audit"` for inter-extension consumers). The `usage` phase also flashes a transient one-line notify with the captured baseline — nothing is sticky, no widget/status/overlay.
 
 | Phase | When | Captures |
 |-------|------|----------|
-| `cold` | `session_start` | Serialized tool definitions (per-tool sizes, top offenders first]+ session messages (usually empty on fresh) |
+| `cold` | `session_start` | Serialized tool definitions (per-tool sizes, top offenders first) + session messages (usually empty on fresh) |
 | `payload` | first `before_agent_start` | Full pre-LLM payload breakdown: system prompt (by source: custom prompt, tool snippets, guidelines, appended prompt, context files, skills), tool schemas, messages → TOTAL BASELINE |
 | `usage` | first `turn_end` | Real provider token usage from the first LLM round-trip |
 
@@ -28,21 +28,23 @@ pi -e git:github.com/nirguk/pi-prompt-analysis
 
 ## Usage
 
-```bash
-# Passive audit (logs on fresh-session init + first turn) — nothing else needed
-pi
+No setup needed — the audit runs automatically on every session (console blocks + `ppa:audit` entries + TUI card + one-line notify on the usage phase; latest numbers via `/ppa json`).
 
-# Force a warm-up first turn so the full cold-start baseline is measured automatically:
-pi --ppa-handshake
-```
-
-With `--ppa-handshake`, on genuinely fresh sessions only (`startup` / `new` — never `resume` / `fork`), the extension sends a minimal first user message:
+On **genuinely fresh interactive sessions only** (`startup` / `new` — never `resume` / `fork`, and never in print/RPC modes where there is no UI), the extension also fires one automatic warm-up turn by default:
 
 ```text
 handshake hello
 ```
 
 …which warms the prompt-cache prefix and completes the audit through all three phases before you type anything.
+
+If you don't want that recurring warm-up cost, disable it:
+
+```bash
+pi --ppa-no-handshake
+# or
+PPA_HANDSHAKE=0 pi
+```
 
 ### Commands
 
