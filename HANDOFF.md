@@ -9,7 +9,7 @@ Ship a pi extension (`ppa` / `pi-prompt-analysis`) that audits a fresh session's
 ## Repo state (as of latest handoff)
 
 - Repo: **github.com/nirguk/pi-prompt-analysis** — public, branch `main`. Working tree clean; latest commit before handoff = "docs: handoff checkpoint".
-- Files: `package.json` (pi manifest → `extensions/`, version `0.1.0`), `extensions/ppa.ts`, `README.md`, `LICENSE` (MIT), `.gitignore`, `HANDOFF.md`.
+- Files: `package.json` (pi manifest → `extensions/`, version `0.2.0`), `extensions/ppa.ts`, `README.md`, `LICENSE` (MIT), `.gitignore`, `HANDOFF.md`.
 - Commit history after checkpoint: `3001a3a` (partial update, had problems) → `321a9d2` (clean-up) → `1949399` (docs trim). **The partial update left a syntax error** (`estimateTokens(m.chars}` missing `)` at line ~244 of the audit card) — fixed + smoke-tested in the current session, commit pending.
 
 ## What current ppa.ts does (verified working live)
@@ -28,8 +28,8 @@ Ship a pi extension (`ppa` / `pi-prompt-analysis`) that audits a fresh session's
 ~~1. Flip handshake to default-on~~ — **done** (flag `ppa-no-handshake`, env `PPA_HANDSHAKE=0`, `hasUI` + reason guards).
 ~~2. Transient notify on usage phase~~ — **done** (`ctx.ui.notify(…, "info")`, hasUI-guarded).
 ~~3. Inline transcript card~~ — **done** (`registerEntryRenderer` + Box/Text; matches `examples/extensions/entry-renderer.ts` pattern).
-~~4. README refresh~~ — **done** (default-on framing: `--ppa-no-handshake` / `PPA_HANDSHAKE=0`; card + notify mentioned; install example pins `@v0.1.0`).
-5. **Commit + tag**: pending in current session — one commit per logical change (ppa.ts paren fix; README; any HANDOFF trim), then `git tag v0.1.0 && git push origin main --tags` (README install example already pins `@v0.1.0`).
+~~4. README refresh~~ — **done** (default-on framing: `--ppa-no-handshake` / `PPA_HANDSHAKE=0`; card + notify mentioned; install example pins `@v0.2`).
+5. **Commit + tag**: **done** — per-change commits; tagged `v0.2` (README + package.json bumped to match); `git push origin main --tags` verified.
 6. **(Optional, get user OK first)** Install into harness: `cd /workspaces/base_pi && pi install -l git:github.com/nirguk/pi-prompt-analysis` — project-local settings → auto-loads every harness session → auto-handshake each fresh session (recurring ≈15.5k tok ≈$0.002 warm-up each — confirm user accepts the recurring cost/habit before enabling). Alternatively keep it `-e`-manual or user-global.
 
 ## Open decisions (user

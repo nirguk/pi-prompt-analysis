@@ -17,7 +17,7 @@ Every audit phase is logged to the console, persisted in the session (`ppa:audit
 ```bash
 pi install git:github.com/nirguk/pi-prompt-analysis
 # pin once stable
-pi install git:github.com/nirguk/pi-prompt-analysis@v0.1.0
+pi install git:github.com/nirguk/pi-prompt-analysis@v0.2
 ```
 
 Or load once without installing:
