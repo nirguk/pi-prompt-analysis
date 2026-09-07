@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Box, Text } from "@earendil-works/pi-tui";
 
 /*
  * pi-prompt-analysis (ppa)
@@ -6,23 +7,27 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
  * Problem: brand-new, "trivial" sessions carry hidden token weight —
  * verbose tool schemas, auto-discovery workspace dumps, or heavy system
  * prompts — before a single user message is sent.
+.
  *
  * This extension audits the baseline:
  *   1. "cold"    - at session_start: serialized tool definitions + session messages
  *   2. "payload" - at the first before_agent_start: full pre-LLM payload breakdown
- *                   (system prompt sections, tool schemas, messages);
+ *                   (system prompt sections,tool schemas,messages);
  *   3. "usage"   - at the first turn_end: real provider token usage from the first
- *                   LLM round-trip.
+ *                   LLM round-trip。
  *
  * Every audit is logged to console (pretty block), persisted in the session via
- * appendEntry ("ppa:audit"), and emitted on pi.events ("ppa:audit") so other
- * extensions can react.
+ * appendEntry ("ppa:audit"),rendered as an inline transcript card in the TUI,and
+ * emitted on pi.events ("ppa:audit") so other extensions can react.
 
- * Optional: --ppa-handshake forces a minimal first turn ("handshake hello")
- * on genuinely fresh sessions (reason: "startup" | "new") so the cold-start
- * baseline is measured automatically, the prompt-cache prefix is warmed, and
- * real work turns start from a known lean state.
-
+ *
+ * Handshake: enabled by default on genuinely fresh interactive sessions
+ * (reason: "startup" | "new" — never resume/fork — and ctx.hasUI): the extension
+ * fires one minimal first turn ("handshake hello") to warm the prompt-cache prefix
+ * and complete the audit through all three phases before you type anything.
+ * Disable with --ppa-no-handshake or env PPA_HANDSHAKE=0。(Print/json modes
+ * have no UI (ctx.hasUI=false), so там the handshake is skipped by design。）
+ *
  * Commands:
  *   /ppa          re-run the cold-start audit on current session state
  *   /ppa json     dump the latest audit record as JSON
@@ -30,7 +35,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const CHARS_PER_TOKEN = 4; // rough estimate: chars / 4 ≈ tokens
 const AUDIT_ENTRY = "ppa:audit";
-const HANDSHAKE_FLAG = "ppa-handshake";
+const NO_HANDSHAKE_FLAG = "ppa-no-handshake";
 const HANDSHAKE_MESSAGE = "handshake hello";
 
 type AuditPhase = "cold" | "payload" | "usage";
@@ -94,7 +99,7 @@ function toolMetas(pi: ExtensionAPI): AuditTool[] {
       name: t.name,
       chars: serialize({ description: t.description, parameters: t.parameters }).length,
     }))
-    .sort((a, b) => b.chars - a.chars);
+    .sort((a,b) => b.chars - a.chars);
 }
 
 function sessionMessages(ctx: { sessionManager: { buildContextEntries?(): unknown[] } }): Array<Record<string, any>> {
@@ -106,6 +111,44 @@ function sessionMessages(ctx: { sessionManager: { buildContextEntries?(): unknow
   } catch {
     return [];
   }
+}
+
+/** Human-friendly byte count: 15332 → "15.0KB", 900 → "900B". */
+function fmtBytes(chars: number): string {
+  const n = Number(chars ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return "0B";
+  if (n >= 1024) return `${(n / 1024).toFixed(1).replace(/\.0$/, "")}KB`;
+   return `${Math.round(n)}B`;
+}
+
+/** Human-friendly token count:  15556 → "15.6k", 812 → "812". */
+function fmtTokens(n: number): string {
+  const v = Number(n ?? 0);
+  if (!Number.isFinite(v) || v <= 0) return "0";
+  if (v >= 1000) return `${(v / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return `${Math.round(v)}`;
+}
+
+/** Dollar figure:  0.00218344 → "0.0022", 1.5 → "1.5". */
+function fmtCost(n: number | undefined): string | undefined {
+  if (typeof n !== "number" || !Number.isFinite(n)) return undefined;
+   return `$${n.toFixed(n < 0.01 ? 4 : 2).replace(/\.?0+$/, "")}`;
+}
+
+/** Extract the normalized usage numbers pi reports (see @earendil-works/pi-ai: input/output/cost.total). */
+function usageNumbers(usage: unknown): { input?: number; output?: number; cost?: number } {
+  const u = (usage ?? {}) as Record<string, any>;
+  const num = (v: unknown): number | undefined => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim() !== "") return Number(v);
+    return undefined;
+  };
+  const cost = u.cost as Record<string, any> | undefined;
+   return {
+    input: num(u.input ?? u.input_tokens),
+    output: num(u.output ?? u.output_tokens),
+    cost: cost ? num(cost.total ?? cost.total_cost) : num(u.cost_usd),
+  };
 }
 
 function emit(pi: ExtensionAPI, record: AuditRecord): void {
@@ -120,14 +163,14 @@ function emit(pi: ExtensionAPI, record: AuditRecord): void {
     }
   }
   if (record.tools && record.tools.length > 0) {
-    const toolsChars = record.tools.reduce((n, t) => n + t.chars, 0);
+    const toolsChars = record.tools.reduce((n,t) => n + t.chars, 0);
     out.push(`  Tools (${record.tools.length}): ${toolsChars} ch (~${estimateTokens(toolsChars)} tok)`);
     for (const t of record.tools) {
       out.push(`      · ${t.name}: ${t.chars} ch`);
     }
   }
   if (record.messages) {
-    const messagesChars = record.messages.reduce((n, m) => n + m.chars, 0);
+    const messagesChars = record.messages.reduce((n,m) => n + m.chars, 0);
     out.push(`  Messages (${record.messageCount}): ${messagesChars} ch (~${estimateTokens(messagesChars)} tok)`);
     for (const m of record.messages) {
       out.push(`      · [${m.index}] (${m.role}): ${m.chars} ch (~${estimateTokens(m.chars)} tok)`);
@@ -142,18 +185,89 @@ function emit(pi: ExtensionAPI, record: AuditRecord): void {
   }
   console.log(out.join("\n"));
 
-// Persist in session (TUI-only, not sent to LLM); surface for other extensions
+  // Persist in session (TUI-only, not sent to LLM); surface for other extensions
   pi.appendEntry(AUDIT_ENTRY, { ...record });
   pi.events.emit("ppa:audit", record);
 }
 
+/** Inline transcript card (TUI-only, zero LLM-token cost: lives inline, scroll-past-able, nothing sticky)。 */
+function renderAuditCard(entry: { data?: AuditRecord }, expanded: boolean, theme: any): Component {
+  const rec = entry.data ?? ({} as AuditRecord);
+   const dim = (s: string) => theme.fg("dim", s);
+   const muted = (s: string) => theme.fg("muted", s);
+   const accent = (s: string) => theme.fg("accent", s);
+   const big = (s: string) => theme.fg("accent", theme.bold(s));
+   const clamp = (s: string, max: number) => (s.length > max ? s.slice(0, max - 3) + "..." : s);
+
+  const lines: string[] = [];
+  const phase = String(rec.phase ?? "?").toUpperCase();
+  const at = (rec.at ?? "").replace("T", " ").slice(0, 19);
+   lines.push(`${accent("🔍 PPA " + phase)}${at ? muted(`  ${at}`) : ""}`);
+
+  // ── usage phase: real provider numbers (no char estimates)
+  if (rec.usage) {
+    const us = usageNumbers(rec.usage);
+    if (typeof us.input === "number") {
+      lines.push(`${big(`~${fmtTokens(us.input)} input tok`)}${muted(` (${fmtBytes(us.input * CHARS_PER_TOKEN)}))`}${us.cost ? muted(`  ≈${fmtCost(us.cost) ?? ""}`) : ""}`);
+     }
+    if (typeof us.output === "number") lines.push(`${muted("  Output:")} ${fmtTokens(us.output)} tok`);
+    if (typeof us.cost === "number") lines.push(`${muted("  Cost:")}  ${fmtCost(us.cost) ?? "—"}`);
+    lines.push(dim("  (full detail on console)"));
+   } else {
+    // ── cold / payload phases: estimated baseline breakdown
+     const totalChars = Number(rec.totalChars ?? 0);
+     const totalTok = estimateTokens(totalChars);
+     if (totalChars > 0) {
+       lines.push(`${big(`~${fmtTokens(totalTok)} tok`)}${muted(` (${fmtBytes(totalChars)}))`}`);
+     }
+     if (rec.systemChars) {
+        lines.push(`${muted("  System prompt:")} ${fmtBytes(rec.systemChars)} (~${fmtTokens(estimateTokens(rec.systemChars))} tok`);
+        if (expanded) {
+          for (const s of (rec.systemSections ?? []).slice(0, 6)) {
+            lines.push(dim(`      · ${clamp(s.label, 28)}: ${fmtBytes(s.chars)}`));
+          }
+        }
+      }
+     const tools = rec.tools ?? [];
+     const toolsChars = tools.reduce((n,t) => n + t.chars, 0);
+     const showTools = expanded ? tools.slice(0, 30) : tools.slice(0, 3);
+     if (tools.length > 0) {
+       lines.push(`${muted(`  Tools (${tools.length}):`)} ${fmtBytes(toolsChars)} (~${fmtTokens(estimateTokens(toolsChars))} tok`);
+       for (const t of showTools) {
+          lines.push(dim(`      · ${clamp(t.name, 30)}: ${fmtBytes(t.chars)`}));
+        }
+        if (!expanded && tools.length > showTools.length) lines.push(dim(`      · ${clamp(tools[showTools.length].name, 30)}: ${fmtBytes(tools[showTools.length].chars`)}…`));
+      }
+      const messages = rec.messages ?? [];
+      const messagesChars = messages.reduce((n,m) => n + m.chars, 0);
+      const showMessages = expanded ? messages.slice(0, 15) : [];
+      if (messages.length > 0 || expanded) {
+        lines.push(`${muted(`  Messages (${messages.length}):`)} ${fmtBytes(messagesChars)} (~${fmtTokens(estimateTokens(messagesChars))} tok`);
+        for (const m of showMessages) {
+           lines.push(dim(`      · [${m.index}] (${m.role}): ${fmtBytes(m.chars)} (~${fmtTokens(estimateTokens(m.chars))} tok)`));
+         }
+        if (expanded && messages.length > showMessages.length) {
+           lines.push(dim(`      · … ${messages.length - showMessages.length} more`));
+         }
+      }
+      if (!expanded) lines.push(dim("  · Expand for the full breakdown."));
+   }
+
+  const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+   box.addChild(new Text(lines.join("\n"), 0,0));
+   return box;
+
+}
+
 export default function (pi: ExtensionAPI) {
-  pi.registerFlag(HANDSHAKE_FLAG, {
+  pi.registerFlag(NO_HANDSHAKE_FLAG, {
     description:
-      "PPA: force a minimal first turn ('handshake hello') on fresh sessions to warm the prompt cache and establish a measured baseline",
+      "PPA: disable the automatic one-turn 'handshake hello' warm-up (enabled by default on fresh interactive sessions; env PPA_HANDSHAKE=0 also disables)",
     type: "boolean" as const,
     default: false,
   });
+
+  pi.registerEntryRenderer<AuditRecord>(AUDIT_ENTRY, (entry, { expanded }, theme) => renderAuditCard(entry, expanded, theme));
 
   let handshakeQueued = false;
 
@@ -162,8 +276,8 @@ export default function (pi: ExtensionAPI) {
     const reason = event.reason;
     const messages = sessionMessages(ctx);
     const tools = toolMetas(pi);
-    const toolsChars = tools.reduce((n, t) => n + t.chars, 0);
-    const messagesChars = messages.reduce((n, m) => n + serialize(m).length, 0);
+    const toolsChars = tools.reduce((n,t) => n + t.chars, 0);
+    const messagesChars = messages.reduce((n,m) => n + serialize(m).length, 0);
 
     emit(pi, {
       phase: "cold",
@@ -176,10 +290,12 @@ export default function (pi: ExtensionAPI) {
       totalChars: toolsChars + messagesChars,
     });
 
-    // Handshake: one minimal first turn on genuinely fresh sessions only。
+    // Handshake: one minimal first turn on genuinely fresh interactive sessions only
     if (
       !handshakeQueued &&
-      pi.getFlag(HANDSHAKE_FLAG) &&
+      !pi.getFlag(NO_HANDSHAKE_FLAG) &&
+      process.env.PPA_HANDSHAKE !== "0" &&
+      ctx.hasUI &&
       (reason === "startup" || reason === "new")
     ) {
       handshakeQueued = true;
@@ -207,15 +323,15 @@ export default function (pi: ExtensionAPI) {
       ["context files", o.contextFiles ?? []],
       ["skills", o.skills ?? []],
     ];
-    const sections: AuditSection[] = rawSections.map(([label, text]) => ({
+    const sections: AuditSection[] = rawSections.map(([label,text]) => ({
       label,
       chars: serialize(text).length,
     }));
 
     const tools = toolMetas(pi);
     const messages = sessionMessages(ctx);
-    const toolsChars = tools.reduce((n, t) => n + t.chars, 0);
-    const messagesChars = messages.reduce((n, m) => n + serialize(m).length, 0);
+    const toolsChars = tools.reduce((n,t) => n + t.chars, 0);
+    const messagesChars = messages.reduce((n,m) => n + serialize(m).length, 0);
     const systemChars = event.systemPrompt?.length ?? 0;
 
     emit(pi, {
@@ -231,9 +347,9 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
-  // ── Phase 2: first-turn real usage (provider token accounting)
+  // ── Phase 2: first-turn real usage (provider token accounting)+ transient notify
   let usageLogged = false;
-  pi.on("turn_end", (event, _ctx) => {
+  pi.on("turn_end", (event, ctx) => {
     if (usageLogged) return;
     const usage = (event.message as any)?.usage;
     if (!usage) return;
@@ -242,10 +358,22 @@ export default function (pi: ExtensionAPI) {
     const record: AuditRecord = {
       phase: "usage",
       at: new Date().toISOString(),
+      sessionFile: ctx.sessionManager.getSessionFile() ?? undefined,
       usage: usage as Record<string, unknown>,
       messageCount: 0,
     };
     emit(pi, record);
+
+    if (ctx.hasUI) {
+      const us = usageNumbers(usage);
+      const parts: string[] = [];
+      if (typeof us.input === "number") parts.push(`~${fmtTokens(us.input)} tok (${fmtBytes(us.input * CHARS_PER_TOKEN)})`);
+      if (typeof us.cost === "number") parts.push(`≈${fmtCost(us.cost) ?? ""}`);
+      ctx.ui.notify(
+        `PPA baseline captured: ${parts.join(" ") || "first turn"} — card in transcript, full detail on console`,
+        "info",
+      );
+    }
   });
 
   // ── /ppa command: re-run audit on demand, or dump latest as JSON
@@ -273,8 +401,8 @@ export default function (pi: ExtensionAPI) {
 
       const messages = sessionMessages(ctx);
       const tools = toolMetas(pi);
-      const toolsChars = tools.reduce((n, t) => n + t.chars, 0);
-      const messagesChars = messages.reduce((n, m) => n + serialize(m).length, 0);
+      const toolsChars = tools.reduce((n,t) => n + t.chars, 0);
+      const messagesChars = messages.reduce((n,m) => n + serialize(m).length, 0);
 
       emit(pi, {
         phase: "cold",
