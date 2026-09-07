@@ -1,4 +1,11 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  CustomEntry,
+  EntryRenderer,
+  SessionMessageEntry,
+  Theme,
+} from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 
 /*
@@ -65,7 +72,21 @@ interface AuditRecord {
   messageCount: number;
   messages?: AuditMessage[];
   totalChars?: number;
-  usage?: Record<string, unknown>;
+  usage?: RawUsage;
+}
+
+/**
+ * Loose shape for provider usage payloads. The native `Usage` type satisfies it
+ * structurally; the extra optional fields tolerate alternate field names (e.g.
+ * legacy `input_tokens` / `cost_usd`) without forcing an `as any` cast.
+ */
+interface RawUsage {
+  input?: number | string;
+  output?: number | string;
+  input_tokens?: number | string;
+  output_tokens?: number | string;
+  cost?: { total?: number | string; total_cost?: number | string };
+  cost_usd?: number | string;
 }
 
 function estimateTokens(chars: number): number {
@@ -82,10 +103,10 @@ function serialize(value: unknown): string {
   }
 }
 
-function recordMessages(messages: Array<Record<string, any>>): AuditMessage[] {
-  return (messages ?? []).map((m, i) => ({
+function recordMessages(messages: readonly SessionMessageEntry["message"][]): AuditMessage[] {
+  return messages.map((m, i) => ({
     index: i,
-    role: String(m.role ?? m.customType ?? "?"),
+    role: String(m.role ?? "?"),
     chars: serialize(m).length,
   }));
 }
@@ -100,12 +121,12 @@ function toolMetas(pi: ExtensionAPI): AuditTool[] {
     .sort((a, b) => b.chars - a.chars);
 }
 
-function sessionMessages(ctx: { sessionManager: { buildContextEntries?(): unknown[] } }): Array<Record<string, any>> {
+function sessionMessages(ctx: ExtensionContext): SessionMessageEntry["message"][] {
   try {
-    const entries = ctx.sessionManager.buildContextEntries?.() ?? [];
+    const entries = ctx.sessionManager.buildContextEntries();
     return entries
-      .filter((e: any) => e.type === "message")
-      .map((e: any) => e.message as Record<string, any>);
+      .filter((e): e is SessionMessageEntry => e.type === "message")
+      .map((e) => e.message);
   } catch {
     return [];
   }
@@ -133,19 +154,17 @@ function fmtCost(n: number | undefined): string | undefined {
   return `$${n.toFixed(n < 0.01 ? 4 : 2).replace(/\.?0+$/, "")}`;
 }
 
-/** Extract normalized usage numbers pi reports. */
-function usageNumbers(usage: unknown): { input?: number; output?: number; cost?: number } {
-  const u = (usage ?? {}) as Record<string, any>;
-  const num = (v: unknown): number | undefined => {
+/** Extract normalized usage numbers from a raw usage payload. */
+function usageNumbers(usage: RawUsage): { input?: number; output?: number; cost?: number } {
+  const num = (v: number | string | undefined): number | undefined => {
     if (typeof v === "number") return v;
     if (typeof v === "string" && v.trim() !== "") return Number(v);
     return undefined;
   };
-  const cost = u.cost as Record<string, any> | undefined;
   return {
-    input: num(u.input ?? u.input_tokens),
-    output: num(u.output ?? u.output_tokens),
-    cost: cost ? num(cost.total ?? cost.total_cost) : num(u.cost_usd),
+    input: num(usage.input ?? usage.input_tokens),
+    output: num(usage.output ?? usage.output_tokens),
+    cost: num(usage.cost?.total ?? usage.cost?.total_cost ?? usage.cost_usd),
   };
 }
 
@@ -188,8 +207,8 @@ function emit(pi: ExtensionAPI, record: AuditRecord): void {
 }
 
 /** Inline transcript card (TUI-only). */
-function renderAuditCard(entry: { data?: AuditRecord }, expanded: boolean, theme: any): any {
-  const rec = entry.data ?? ({} as AuditRecord);
+const renderAuditCard: EntryRenderer<AuditRecord> = (entry, { expanded }, theme) => {
+  const rec: Partial<AuditRecord> = entry.data ?? {};
   const dim = (s: string) => theme.fg("dim", s);
   const muted = (s: string) => theme.fg("muted", s);
   const accent = (s: string) => theme.fg("accent", s);
@@ -263,7 +282,7 @@ export default function (pi: ExtensionAPI) {
     default: false,
   });
 
-  pi.registerEntryRenderer<AuditRecord>(AUDIT_ENTRY, (entry, { expanded }, theme) => renderAuditCard(entry, expanded, theme));
+  pi.registerEntryRenderer<AuditRecord>(AUDIT_ENTRY, renderAuditCard);
 
   let handshakeQueued = false;
 
@@ -343,7 +362,7 @@ export default function (pi: ExtensionAPI) {
   let usageLogged = false;
   pi.on("turn_end", (event, ctx) => {
     if (usageLogged) return;
-    const usage = (event.message as any)?.usage;
+    const usage = "usage" in event.message ? event.message.usage : undefined;
     if (!usage) return;
     usageLogged = true;
 
@@ -351,7 +370,7 @@ export default function (pi: ExtensionAPI) {
       phase: "usage",
       at: new Date().toISOString(),
       sessionFile: ctx.sessionManager.getSessionFile() ?? undefined,
-      usage: usage as Record<string, unknown>,
+      usage,
       messageCount: 0,
     };
     emit(pi, record);
@@ -377,7 +396,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (args: string, ctx) => {
       const entries = ctx.sessionManager
         .getEntries()
-        .filter((e: any) => e.type === "custom" && e.customType === AUDIT_ENTRY) as Array<Record<string, any>>;
+        .filter((e): e is CustomEntry<AuditRecord> => e.type === "custom" && e.customType === AUDIT_ENTRY);
 
       if (args === "json") {
         const last = entries[entries.length - 1];
