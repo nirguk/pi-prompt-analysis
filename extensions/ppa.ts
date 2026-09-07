@@ -26,12 +26,13 @@ import { Box, Text } from "@earendil-works/pi-tui";
  * appendEntry ("ppa:audit"), rendered as an inline transcript card in the TUI, and
  * emitted on pi.events ("ppa:audit") so other extensions can react.
  *
- * Handshake: enabled by default on genuinely fresh interactive sessions
- * (reason: "startup" | "new" — never resume/fork — and ctx.hasUI): the extension
- * fires one minimal first turn ("handshake hello") to warm the prompt-cache prefix
- * and complete the audit through all three phases before you type anything.
- * Disable with --ppa-no-handshake or env PPA_HANDSHAKE=0. (Print/json modes
- * have no UI (ctx.hasUI=false), so there the handshake is skipped by design.)
+ * Handshake: enabled by default on genuinely fresh sessions with UI
+ * (reason: "startup" | "new" — never resume/fork/reload — and ctx.hasUI,
+ * which is true in TUI and RPC modes): the extension fires one minimal first
+ * turn ("handshake hello") to warm the prompt-cache prefix and complete the
+ * audit through all three phases before you type anything. Disable with
+ * --ppa-no-handshake or env PPA_HANDSHAKE=0. (Print/json modes have no UI
+ * (ctx.hasUI=false), so there the handshake is skipped by design.)
  *
  * Commands:
  *    /ppa         re-run the cold-start audit on current session state
