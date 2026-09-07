@@ -19,7 +19,7 @@ The extension hooks three session events; for each, it logs an audit block to th
 ```bash
 pi install git:github.com/nirguk/pi-prompt-analysis
 # pin a release
-pi install git:github.com/nirguk/pi-prompt-analysis@v0.2
+pi install git:github.com/nirguk/pi-prompt-analysis@v0.2.1
 ```
 
 Or load once without installing:
