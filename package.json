@@ -1,0 +1,15 @@
+{
+  "name": "pi-prompt-analysis",
+  "version": "0.1.0",
+  "description": "Cold-start prompt audit for pi: measures baseline token overhead of fresh sessions (system prompt, tool schemas, context injections) before/after the first turn. Nickname: ppa.",
+  "keywords": ["pi-package", "ppa", "prompt-audit", "tokens"],
+  "license": "MIT",
+  "author": "nirguk",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  }
+}
