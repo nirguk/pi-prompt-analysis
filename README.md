@@ -224,7 +224,7 @@ the session file's pre-LLM payload entry). Programmatically:
 
 Architecture, the exact record model, measurement methodology, rendering
 rules, the full terminology glossary, design decisions, and how to verify
-changes (including the scripts + harness): see
+changes (including `npm run typecheck`, the scripts, and the harness): see
 **[PPA_TECHNICAL.md](PPA_TECHNICAL.md)**.
 
 ## License

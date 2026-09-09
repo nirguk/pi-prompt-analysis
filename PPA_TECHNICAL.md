@@ -36,9 +36,10 @@ Each phase, in order:
 4. emits the record on `pi.events` as the `"ppa:audit"` event for
    inter-extension consumers.
 
-`payload` and `usage` each report **once** per session (guarded by
-`payloadLogged` / `usageLogged` flags). `/ppa` re-runs a payload audit on
-current state (stamped `reason: "manual"`).
+`payload` and `usage` each report **once** per session — the guard is the
+transcript itself (ppa skips a phase if its own audit entry is already in
+the session), so `/reload` restarts ppa without re-reporting. `/ppa`
+re-runs a payload audit on demand (stamped `reason: "manual"`).
 
 ## 2. Data model
 
@@ -259,16 +260,24 @@ implements these agreements:
 
 ## 9. Verification
 
-No TypeScript compiler in the environment — verification is a triple:
+Verification is a **quad**: a real TypeScript compile plus three runtime
+passes. The compile catches whole classes the runtime can't — e.g. a
+`ReferenceError` like the `reason` (vs `sessionReason`) typo that crashed
+startup, or a reason string drifting from the documented set.
 
-1. `node scripts/verify-format.ts` — fixed-value formatter checks + the
+1. `npm run typecheck` — `tsc --noEmit` over `extensions/` + `scripts/`
+   (strict, with `noUncheckedIndexedAccess`). The pi/pi-tui types must be
+   resolvable from `node_modules/` (gitignored): in this workspace that is
+   a set of symlinks into the globally installed pi (or a plain `npm
+   install` with normal peer resolution).
+2. `node scripts/verify-format.ts` — fixed-value formatter checks + the
    alignment invariant: every decimal point in the K-chars and K-tokens
    columns lands on the same character offset in every row (also covers the
    share column: rendered cell, blank cell for shareless rows, widest
    right-aligned, uniform start column).
-2. `node scripts/gen-readme-block.ts` — regenerates the README's sample
+3. `node scripts/gen-readme-block.ts` — regenerates the README's sample
    console block from the real session numbers (writes `/tmp/readme-block.txt`).
-3. `/tmp/ppacheck/harness.mjs` — loads the **real** session records from
+4. `/tmp/ppacheck/harness.mjs` — loads the **real** session records from
    `/workspaces/base_pi/.pi/sessions/…/2026-09-07T12-43-19-….jsonl` and drives
    a copy of `ppa.ts` (with a test-only `__test = { emit, usageNumbers,
    totalInputTokens, renderAuditCard }` export appended) through payload/
@@ -283,7 +292,10 @@ ppa.ts`, append the `__test` export, `node /tmp/ppacheck/harness.mjs`. The
 
 - `node` emits `MODULE_TYPELESS_PACKAGE_JSON` warnings when running the
   scripts (no `"type": "module"` in package.json) — harmless, reparsed as ESM.
-- No real `tsc --noEmit`; verification is parse+runtime via type stripping.
+- `npm run typecheck` is compile-only: it needs the pi/pi-tui types in
+  `node_modules/` (see §9), and runtime verification still runs through
+  Node's type stripping (`node scripts/…`), which ignores types — the
+  runtime harness can't replace the compiler.
 - `expanded` is injected by the platform; the harness passes it explicitly
   for both states. Unknown defaults in some builds could differ.
 - The handshake (94 chars) wrinkle: with a ~3.8 chars/token real tokenizer,
@@ -306,3 +318,9 @@ ppa.ts`, append the `__test` export, `node /tmp/ppacheck/harness.mjs`. The
   them), reason code shown on the card in both states, `/ppa` re-runs a
   payload audit, README split from this technical reference, handoff
   superseded.
+- **This revision (typecheck)** — `tsc --noEmit` harness (`npm run typecheck`) + narrowed
+  `reason` typing (`SessionStartReason`/`AuditReason` unions), fixed the
+  `session_start` typo (handshake gated on the undefined `reason`).
+- **Reload-quiet** — audit guards read the session transcript instead of
+  in-memory flags, so `/reload` no longer re-runs payload/usage; `/ppa`
+  stays the explicit re-measure.

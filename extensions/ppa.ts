@@ -76,6 +76,11 @@ const HANDSHAKE_MESSAGE = "handshake hello";
 
 type AuditPhase = "payload" | "usage";
 
+/** Reason codes pi emits on `session_start` (see SessionStartEvent in pi's types). */
+type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
+/** Reason stamped on an audit record: a session-start code, or "manual" for `/ppa`. */
+type AuditReason = SessionStartReason | "manual";
+
 interface AuditSection {
   label: string;
   chars: number;
@@ -96,7 +101,7 @@ interface AuditRecord {
   phase: AuditPhase;
   at: string;
   /** session-start reason (startup/new/resume/fork/reload; "manual" for /ppa) — shown above the payload card table */
-  reason?: string;
+  reason?: AuditReason;
   sessionFile?: string;
   systemChars?: number;
   systemSections?: AuditSection[];
@@ -257,10 +262,11 @@ function findAudit(ctx: ExtensionContext, phase: AuditPhase): AuditRecord | unde
     const entries = ctx.sessionManager.getEntries();
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i];
-      if (e.type === "custom" && e.customType === AUDIT_ENTRY) {
-        const data = (e as CustomEntry<AuditRecord>).data;
-        if (data?.phase === phase) return data;
-      }
+      if (e?.type !== "custom") continue;
+      const entry = e as CustomEntry<AuditRecord>;
+      if (entry.customType !== AUDIT_ENTRY) continue;
+      const data = entry.data;
+      if (data?.phase === phase) return data;
     }
   } catch {
     // session entries unavailable (e.g. headless) — treat as no prior audit
@@ -561,7 +567,7 @@ export default function (pi: ExtensionAPI) {
 
   let handshakeQueued = false;
   /** session-start reason code, stamped onto the payload record (cold phase is gone — the payload is the cold-start audit now) */
-  let sessionReason: string | undefined;
+  let sessionReason: SessionStartReason | undefined;
 
   pi.on("session_start", async (event, ctx) => {
     sessionReason = event.reason;
@@ -571,7 +577,7 @@ export default function (pi: ExtensionAPI) {
       !pi.getFlag(NO_HANDSHAKE_FLAG) &&
       process.env.PPA_HANDSHAKE !== "0" &&
       ctx.hasUI &&
-      (reason === "startup" || reason === "new")
+      (sessionReason === "startup" || sessionReason === "new")
     ) {
       handshakeQueued = true;
       try {
@@ -583,10 +589,10 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  let payloadLogged = false;
   pi.on("before_agent_start", (event, ctx) => {
-    if (payloadLogged) return;
-    payloadLogged = true;
+    // once per session — the transcript is the guard (survives /reload):
+    // stay quiet if a payload audit is already recorded in this session
+    if (findAudit(ctx, "payload")) return;
 
     const sections = systemSections(event.systemPromptOptions ?? {});
 
@@ -611,12 +617,11 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
-  let usageLogged = false;
   pi.on("turn_end", (event, ctx) => {
-    if (usageLogged) return;
     const usage = "usage" in event.message ? event.message.usage : undefined;
     if (!usage) return;
-    usageLogged = true;
+    // once per session — the transcript is the guard (survives /reload)
+    if (findAudit(ctx, "usage")) return;
 
     const record: AuditRecord = {
       phase: "usage",

@@ -87,13 +87,13 @@ const shared = [
   { label: "C:", chars: "10.0", tokens: "~2.5", share: "77%" },
 ];
 const w = renderAlignedRows(shared);
-eq(w[0], "A:   1.0 K-chars  ~0.3 K-tokens  23%", "share row rendered with cell");
-eq(w[1].trimEnd(), "B:   2.0 K-chars  ~0.5 K-tokens", "shareless row leaves a blank cell");
-eq(w[2], "C:  10.0 K-chars  ~2.5 K-tokens  77%", "widest share right-aligned");
+eq(w[0]!, "A:   1.0 K-chars  ~0.3 K-tokens  23%", "share row rendered with cell");
+eq(w[1]!.trimEnd(), "B:   2.0 K-chars  ~0.5 K-tokens", "shareless row leaves a blank cell");
+eq(w[2]!, "C:  10.0 K-chars  ~2.5 K-tokens  77%", "widest share right-aligned");
 const shareStart = w.map((l) => l.lastIndexOf(" K-tokens") + " K-tokens".length + 2);
 check(
-  new Set(shareStart).size === 1 && w[0].charAt(shareStart[0]) !== " " && w[1].charAt(shareStart[0]) === " ",
-  `share cell start uniform at col ${shareStart[0]}`,
+  new Set(shareStart).size === 1 && w[0]!.charAt(shareStart[0]!) !== " " && w[1]!.charAt(shareStart[0]!) === " ",
+  `share cell start uniform at col ${shareStart[0]!}`,
 );
 console.log("\nSample shared rows (a row's % of the phase total):");
 for (const line of w) console.log(`  ${line}`);
